@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: render-bridge
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn rssbridge.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: RUN_SECRET
+        value: ""
+      - key: ANALYZER_API_BASE
+        value: ""
+      - key: PROMPT_API_BASE
+        value: ""
+      - key: IMAGE_API_BASE
+        value: ""
+      - key: TELEGRAM_NOTIFY_URL
+        value: ""
+      - key: TELEGRAM_NOTIFY_TOKEN
+        value: ""
+      - key: TELEGRAM_DEFAULT_CHAT_ID
+        value: ""
+      - key: RSS_FEEDS
+        value: ""

@@ -1,0 +1,208 @@
+Project Architecture: RSS News Analysis + Image Generation + Telegram Bot
+=====================================================================
+
+Overview
+--------
+این پروژه یک سیستم تحلیل خبر، تولید پرامپت تصویر، تولید تصویر و ارسال پیام تلگرام است.
+بخشی از معماری اولیه با n8n ساخته شده بود. چون الان n8n ندارید، گزینه جایگزین Render + Django هم اضافه شده است.
+
+اصلی‌ترین بخش‌ها
+-----------------
+
+1. llm-chat-app-template
+   - یک Cloudflare Worker AI برای تحلیل خبر است.
+   - نقطه ورود اصلی: `/api/chat`
+   - دیتا ذخیره می‌کند در D1 با جدول persona و analysis_jobs.
+   - جستجوی وب را با Tavily انجام می‌دهد.
+   - خروجی تحلیل فارسی و ساختار یافته تولید می‌کند.
+   - همچنین endpoint های داخلی برای job و persona دارد:
+     - `GET /api/jobs/latest`
+     - `GET /api/jobs/{external_id}`
+     - `PUT /api/jobs/{external_id}`
+     - `GET /api/persona`
+     - `PUT /api/persona`
+     - `POST /api/persona/memories`
+     - `POST /api/persona/reset`
+
+2. prompt-generator
+   - یک Cloudflare Worker AI برای ساخت پرامپت تصویر است.
+   - نقطه ورود اصلی: `/api/prompts`
+   - هر درخواستی که به آن ارسال شود تبدیل به یک prompt انگلیسی آماده برای مدل تصویر می‌شود.
+   - خروجی prompt را در D1 ذخیره می‌کند.
+
+3. text-to-image-template
+   - یک Cloudflare Worker AI برای تولید تصویر و ارسال به تلگرام است.
+   - نقطه ورود‌های اصلی:
+     - `POST /api/generate`
+     - `POST /api/generate-to-telegram`
+     - `POST /telegram/webhook`
+   - `generate-to-telegram` یک JSON تأیید برمی‌گرداند و تصویر را مستقیماً به تلگرام می‌فرستد.
+   - `telegram/webhook` برای پاسخ به پیام‌های مستقیم تلگرام استفاده می‌شود.
+
+4. telegram-news-bot
+   - بات نوتیفیکیشن تلگرام است که با n8n یا سرویس جایگزین تماس می‌گیرد.
+   - endpoint های داخلی:
+     - `POST /notify`  (از n8n یا Render bridge)
+     - `POST /webhook` (وبهوک تلگرام برای پیام و کلیدها)
+     - `GET /set-webhook`
+     - `GET /delete-webhook`
+     - `GET /health`
+   - مهم: `ANALYZER_API_BASE` باید به آدرس سرویس تحلیل اشاره کند.
+   - مهم: `BOT_NOTIFY_TOKEN` برای امن‌سازی `/notify` لازم است.
+   - `ALLOWED_TELEGRAM_USER_ID` مشخص می‌کند چه کسی می‌تواند بات را کنترل کند.
+   - `TELEGRAM_CHANNEL_ID` اگر بخواهید پس از تأیید، خروجی را به کانال ارسال کند.
+
+5. render-bridge
+   - یک سرویس Django است که جایگزین n8n می‌شود.
+   - endpoint های اصلی:
+     - `GET /health/`
+     - `POST /run-rss/`
+   - کارکرد آن:
+     - خواندن RSS
+     - انتخاب خبر برجسته
+     - ارسال خبر به سرویس تحلیل
+     - ارسال خبر به سرویس پرامپت
+     - ارسال prompt به سرویس تصویر
+     - اطلاع دادن به بات تلگرام
+   - اگر n8n ندارید، این سرویس همان زنجیره را روی Render پیاده می‌کند.
+
+
+شبکه کلی اتصال‌ها
+------------------
+
+RSS feeds
+   |
+   v
+render-bridge (Django)
+   |---> llm-chat-app-template `/api/chat`
+   |---> prompt-generator `/api/prompts`
+   |---> text-to-image-template `/api/generate-to-telegram`
+   |---> telegram-news-bot `/notify`
+
+همچنین اگر بخواهید تلگرام مستقیم داشته باشید:
+text-to-image-template `/telegram/webhook` <-- Telegram webhook
+
+
+ASCII Diagram
+-------------
+
+  [ RSS Feeds ]
+         |
+         v
+  [ render-bridge ]
+         |
+   +-----+-----+------------------+
+   |     |     |                  |
+   v     v     v                  v
+ [Analyzer] [Prompt Gen] [Image Gen] [Telegram Bot]
+   |         |            |            |
+   |         |            |            |
+   |         |            +--> Telegram Chat / Channel
+   |         |
+   |         +--> prompt text
+   |
+   +--> analysis job/results
+
+
+جزئیات اتصال‌ها و API
+---------------------
+
+1) RSS -> render-bridge
+   - `render-bridge` فیدهای RSS را می‌خواند.
+   - اگر خبر جدید و منتخب باشد، یک `external_id` می‌سازد.
+   - اگر duplicate نباشد، وارد pipeline می‌شود.
+
+2) render-bridge -> llm-chat-app-template
+   - endpoint: `POST {ANALYZER_API_BASE}/api/chat`
+   - payload شامل:
+     - `external_id`
+     - `news_title`
+     - `messages: [{ role: 'user', content: news_text }]`
+   - این سرویس خبر را تحلیل می‌کند و job را در D1 ذخیره می‌کند.
+   - تحلیل برای بات و گزارش داخلی قابل بازیابی است.
+
+3) render-bridge -> prompt-generator
+   - endpoint: `POST {PROMPT_API_BASE}/api/prompts`
+   - payload شامل:
+     - `input`: متن خلاصه خبر
+   - سرویس یک prompt امن انگلیسی تولید می‌کند و آن را در D1 ذخیره می‌کند.
+
+4) render-bridge -> text-to-image-template
+   - endpoint: `POST {IMAGE_API_BASE}/api/generate-to-telegram`
+   - payload شامل:
+     - `prompt`
+     - `chatId` (یا از `TELEGRAM_DEFAULT_CHAT_ID` استفاده می‌کند)
+     - `caption` (مثلاً عنوان خبر)
+   - سرویس تصویر را می‌سازد و به تلگرام ارسال می‌کند.
+
+5) render-bridge -> telegram-news-bot
+   - endpoint: `POST {TELEGRAM_NOTIFY_URL}/notify`
+   - هدر `x-notify-token: {TELEGRAM_NOTIFY_TOKEN}`
+   - payload:
+     - `external_id`
+     - `title`
+   - بات برای یک کاربر مجاز، اعلان می‌سازد تا خبر را مشاهده/ویرایش/تایید کند.
+
+6) تلگرام مستقیم به через text-to-image-template
+   - اگر وبهوک تلگرام به `text-to-image-template/telegram/webhook` تنظیم شود، پیام کاربر با `/imagine ...` تصویر تولید می‌کند.
+
+
+نکته مهم درباره n8n
+-------------------
+
+فایل workflow اصلی `CF Flux2 -_ Telegram.fixed.json` نشان می‌دهد که:
+- RSS با یک cron هر ۱۵ دقیقه اجرا می‌شد.
+- خبرها فیلتر، رتبه‌بندی و دداپلیکیت می‌شدند.
+- سپس به:
+  - `/api/chat` برای تحلیل
+  - `/api/prompts` برای تولید prompt
+  - `/api/generate-to-telegram` برای تولید تصویر و ارسال
+  - `/notify` برای ارسال اعلان به بات
+
+این یعنی n8n نقش هماهنگ‌کننده داشت، اما الآن `render-bridge` می‌تواند همان نقش را انجام دهد.
+
+
+فایل‌های کلیدی و جایگاه‌شان
+--------------------------
+
+- `llm-chat-app-template/src/index.ts` : سرویس تحلیل / job + persona
+- `prompt-generator/src/index.ts` : سرویس تولید prompt
+- `text-to-image-template/src/index.ts` : سرویس تولید تصویر و تلگرام
+- `llm-chat-app-template/telegrambot/index.js` : بات تلگرام n8n bridge
+- `text-to-image-template/telegrambot/index.js` : همان بات مشابه
+- `render-bridge/bridge/tasks.py` : منطق RSS -> سرویس‌ها -> بات
+- `render-bridge/render.yaml` : تنظیم Render service
+
+
+چرا این معماری منطقی است
+------------------------
+
+- `llm-chat-app-template` تحلیل عمیقی تولید می‌کند و job/history دارد.
+- `prompt-generator` خروجی‌ای می‌سازد که مستقیماً برای مدل تصویر مناسب است.
+- `text-to-image-template` تصویر را می‌سازد و تلگرام را هدف می‌گیرد.
+- `telegram-news-bot` نوتیف‌ها، تعامل و تایید انسان را مدیریت می‌کند.
+- `render-bridge` جایگزین n8n می‌شود و همه را به هم وصل می‌کند.
+
+
+روش اجرای کامل
+----------------
+
+1. Deploy هر سه Cloudflare Worker:
+   - llm-chat-app-template
+   - prompt-generator
+   - text-to-image-template
+2. Deploy یا اجرا کردن `telegram-news-bot` (یک worker بات انجام می‌دهد).
+3. Deploy `render-bridge` روی Render.
+4. در `render-bridge` متغیرها را تنظیم کن:
+   - `ANALYZER_API_BASE`
+   - `PROMPT_API_BASE`
+   - `IMAGE_API_BASE`
+   - `TELEGRAM_NOTIFY_URL`
+   - `TELEGRAM_NOTIFY_TOKEN`
+   - `TELEGRAM_DEFAULT_CHAT_ID`
+   - `RSS_FEEDS`
+5. `render-bridge` را با cron هر ۱۵ دقیقه یا هر دوره‌ای که خواستی اجرا کن.
+6. اگر می‌خواهی تلگرام هم پیام مستقیم بگیرد، webhook تلگرام را به `text-to-image-template/telegram/webhook` وصل کن.
+
+
+این فایل می‌تواند به عنوان نقشه کامل معماری پروژه استفاده شود. اگر می‌خواهی، می‌توانم همین حالا یک نسخه PDF ساده یا فایل Markdown هم بسازم تا راحت‌تر مرور کنی.

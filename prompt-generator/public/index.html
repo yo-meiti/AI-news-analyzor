@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Image Prompt Generator</title>
+		<style>
+			:root {
+				--primary-color: #f6821f;
+				--primary-hover: #e67e22;
+				--light-bg: #f9fafb;
+				--border-color: #e5e7eb;
+				--text-color: #1f2937;
+				--text-light: #6b7280;
+				--panel-bg: #ffffff;
+				--card-bg: #f7f8fa;
+			}
+
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+
+			body {
+				font-family:
+					-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+					Cantarell, sans-serif;
+				line-height: 1.6;
+				color: var(--text-color);
+				max-width: 960px;
+				margin: 0 auto;
+				padding: 1rem;
+				background: var(--light-bg);
+			}
+
+			header {
+				text-align: center;
+				margin-bottom: 1rem;
+				padding: 1rem 0;
+				border-bottom: 1px solid var(--border-color);
+			}
+
+			h1 {
+				font-size: 1.5rem;
+				color: var(--primary-color);
+			}
+
+			.app-grid {
+				display: grid;
+				grid-template-columns: 1fr;
+				gap: 1rem;
+			}
+
+			.panel {
+				border: 1px solid var(--border-color);
+				border-radius: 10px;
+				background: var(--panel-bg);
+				padding: 1rem;
+			}
+
+			.input-panel textarea {
+				width: 100%;
+				min-height: 120px;
+				padding: 0.75rem;
+				border: 1px solid var(--border-color);
+				border-radius: 8px;
+				font-family: inherit;
+				resize: vertical;
+			}
+
+			.input-actions {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				margin-top: 0.75rem;
+				gap: 1rem;
+			}
+
+			#generate-button {
+				padding: 0.65rem 1rem;
+				background-color: var(--primary-color);
+				color: #fff;
+				border: 0;
+				border-radius: 8px;
+				cursor: pointer;
+				font-weight: 600;
+			}
+
+			#generate-button:hover {
+				background-color: var(--primary-hover);
+			}
+
+			#generate-button:disabled {
+				background: var(--text-light);
+				cursor: not-allowed;
+			}
+
+			#status-text {
+				color: var(--text-light);
+				font-size: 0.9rem;
+			}
+
+			.result-box {
+				background: var(--card-bg);
+				border: 1px solid var(--border-color);
+				border-radius: 8px;
+				padding: 0.8rem;
+				min-height: 84px;
+				margin-top: 0.5rem;
+			}
+
+			#result-prompt {
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+
+			.history-list {
+				display: grid;
+				gap: 0.75rem;
+				max-height: 420px;
+				overflow: auto;
+			}
+
+			.history-item {
+				border: 1px solid var(--border-color);
+				border-radius: 8px;
+				padding: 0.75rem;
+				background: var(--card-bg);
+			}
+
+			.history-time {
+				font-size: 0.8rem;
+				color: var(--text-light);
+				margin-bottom: 0.4rem;
+			}
+
+			.history-input {
+				font-size: 0.9rem;
+				margin-bottom: 0.3rem;
+			}
+
+			.history-prompt {
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+
+			footer {
+				margin-top: 1rem;
+				text-align: center;
+				font-size: 0.85rem;
+				color: var(--text-light);
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>Image Prompt Generator</h1>
+			<p>Generate English prompts and store all results in D1</p>
+		</header>
+
+		<main class="app-grid">
+			<section class="panel input-panel">
+				<h2>Create Prompt</h2>
+				<p>Describe your idea. Press Ctrl/Cmd + Enter to generate.</p>
+				<textarea
+					id="user-input"
+					placeholder="Example: cinematic close-up portrait of a cyberpunk samurai in rainy Tokyo at night"
+				></textarea>
+				<div class="input-actions">
+					<p id="status-text">Ready.</p>
+					<button id="generate-button">Generate Prompt</button>
+				</div>
+				<div class="result-box">
+					<p id="result-prompt">Your generated prompt will appear here.</p>
+				</div>
+			</section>
+
+			<section class="panel">
+				<h2>Saved Prompts</h2>
+				<div id="history-list" class="history-list"></div>
+			</section>
+		</main>
+
+		<footer>
+			<p>Cloudflare Workers AI + D1</p>
+		</footer>
+
+		<script src="chat.js"></script>
+	</body>
+</html>

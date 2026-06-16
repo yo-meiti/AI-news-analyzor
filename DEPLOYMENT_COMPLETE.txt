@@ -1,0 +1,118 @@
+═══════════════════════════════════════════════════════════════════════════════
+                         DEPLOYMENT SUMMARY (2026-06-16)
+═══════════════════════════════════════════════════════════════════════════════
+
+PROJECT: RSS News → Analyzer → Prompt Generator → Image Generator → Telegram Bot
+(Replacing n8n with Cloudflare Workers + Django bridge)
+
+═══════════════════════════════════════════════════════════════════════════════
+                              ✅ COMPLETED
+═══════════════════════════════════════════════════════════════════════════════
+
+1. REPOSITORY INSPECTION
+   ✓ Analyzed existing Cloudflare Workers (3 workers + 2 telegram bot versions)
+   ✓ Extracted n8n workflow logic and API endpoints
+   ✓ Created Django bridge (render-bridge) for RSS ingestion
+
+2. CLOUDFLARE INFRASTRUCTURE
+   ✓ Created D1 database: prompt_generator_db (uuid: 0f9c70fd-812e-4275-8925-e7dcdee12998)
+   ✓ Created D1 database: llm_persona_memory_v2 (uuid: c30aba63-a360-4b89-9be0-c87a4c99bbfd)
+   ✓ Applied SQL schemas via Cloudflare dashboard:
+     - prompt_generator_db: prompts table + index
+     - llm_persona_memory_v2: persona_state, persona_memories, conversation_turns, analysis_reference_samples tables
+
+3. AUTHENTICATION & AUTHORIZATION
+   ✓ Verified Cloudflare account (bac5221ac4b02d148ab07a4652920423)
+   ✓ Refreshed OAuth token with full scopes (ai:write, ai-search:write, ai-search:run, d1:write, workers:write, etc.)
+
+4. WORKER DEPLOYMENT
+   ✓ Deployed: prompt-generator-cf
+     URL: https://prompt-generator-cf.prompt-generator.workers.dev
+   ✓ Deployed: llm-chat-app-template-meiti-v1 (renamed to avoid conflicts)
+     URL: https://llm-chat-app-template-meiti-v1.prompt-generator.workers.dev
+   ✓ Deployed: text-to-image-template
+     URL: https://text-to-image-template.prompt-generator.workers.dev
+   ✓ Deployed: telegram-news-bot
+     URL: https://telegram-news-bot.prompt-generator.workers.dev
+
+5. SECRETS MANAGEMENT
+   ✓ Set TELEGRAM_BOT_TOKEN for both telegrambot workers
+
+6. TESTING
+   ✓ Smoke test: GET /api/prompts → HTTP 200 (returns [])
+   ✓ Smoke test: GET /health → HTTP 200 ({"ok":true,"service":"telegrambot"})
+   ✓ Smoke test: Root pages load and return HTML
+
+═══════════════════════════════════════════════════════════════════════════════
+                          ⏳ REMAINING TASKS
+═══════════════════════════════════════════════════════════════════════════════
+
+To complete the setup, provide these secrets and I will finish configuration:
+
+1. BOT_NOTIFY_TOKEN
+   Purpose: Authentication header for /notify endpoint (for n8n / render-bridge calls)
+   
+2. ALLOWED_TELEGRAM_USER_ID
+   Purpose: Numeric Telegram user ID allowed to interact with the bot
+   Example: 123456789
+   
+3. TELEGRAM_WEBHOOK_SECRET (optional)
+   Purpose: Secret header for validating Telegram webhook calls
+   
+4. PUBLIC_WEBHOOK_URL
+   Purpose: Bot's public URL (for Telegram to POST updates to)
+   Example: https://telegram-news-bot.prompt-generator.workers.dev
+   
+5. ANALYZER_API_BASE
+   Purpose: Analyzer worker URL (for telegrambot to call /api/jobs)
+   Example: https://llm-chat-app-template-meiti-v1.prompt-generator.workers.dev
+   
+6. TAVILY_API_KEY (optional)
+   Purpose: Web search API key for analyzer worker
+   
+7. TELEGRAM_CHANNEL_ID
+   Purpose: Target channel for publishing (e.g., @channel_name or numeric ID)
+
+Once provided, I will:
+ ① Set all secrets via `npx wrangler secret put`
+ ② Install Telegram webhook (call /set-webhook endpoint)
+ ③ Test end-to-end: POST test JSON to /notify, verify Telegram delivery
+
+═══════════════════════════════════════════════════════════════════════════════
+                          ARCHITECTURE REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+RSS Flow (after render-bridge deployment):
+  Render Django App → /api/prompts → Prompt Generator
+                   → /api/chat      → Analyzer (with Tavily search)
+                   → /api/generate  → Image Generator
+                   → /notify        → Telegram Bot → sendMessage to user/channel
+
+Worker Bindings:
+  prompt-generator:
+    - D1: prompt_generator_db (stores generated prompts)
+    - AI: Llama 3.1 8B for prompt generation
+  
+  llm-chat-app-template:
+    - D1: llm_persona_memory_v2 (stores conversation history & persona state)
+    - AI: GPT-OSS 120B for analysis
+    - Tavily: External web search API
+  
+  text-to-image-template:
+    - AI: Flux 2 for image generation
+    - Telegram: Integration to send images to channel
+  
+  telegram-news-bot:
+    - Secrets: TELEGRAM_BOT_TOKEN, ANALYZER_API_BASE, ALLOWED_TELEGRAM_USER_ID, etc.
+    - Routes: /webhook (Telegram updates), /notify (n8n/bridge calls), /set-webhook (setup)
+
+═══════════════════════════════════════════════════════════════════════════════
+                            NEXT STEPS
+═══════════════════════════════════════════════════════════════════════════════
+
+Step 1: Provide the 7 secrets listed above (2-7 are optional, 1 and 5 are required)
+Step 2: I will set secrets and install webhook
+Step 3: Run end-to-end test
+Step 4: (Optional) Deploy render-bridge to Render for automated RSS ingestion
+
+═══════════════════════════════════════════════════════════════════════════════

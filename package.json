@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "render": "^0.1.4",
+    "render-cli": "^0.3.2"
+  }
+}

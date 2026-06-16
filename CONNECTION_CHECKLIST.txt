@@ -1,0 +1,129 @@
+CONNECTION VERIFICATION CHECKLIST
+==================================
+
+بررسی اتصال‌های میان سرویس‌ها
+-------------------------------
+
+✓ llm-chat-app-template-v2 (تحلیل)
+  [?] D1 دیتابیس llm_persona_memory_v2 موجود و مهاجر‌شده؟
+  [?] API آدرس معلوم: https://llm-chat-app-template-v2.YOUR_DOMAIN.workers.dev
+  [?] TAVILY_API_KEY تنظیم شده؟
+  [?] اسکیمای migrations/001 و 002 اعمال شده؟
+
+✓ llm-chat-app-template (prompt-generator) ⚠️ نام تعارض!
+  [?] D1 دیتابیس prompt_generator_db موجود و مهاجر‌شده؟
+  [?] API آدرس معلوم: https://llm-chat-app-template.YOUR_DOMAIN.workers.dev
+  [?] اسکیمای schema.sql اعمال شده؟
+  
+  ⚠️ مشکل شناسایی شده:
+     - prompt-generator/wrangler.jsonc نام worker را "llm-chat-app-template" تنظیم کرده است
+     - این عین نام llm-chat-app-template است که render-bridge از آن استفاده می‌کند
+     - بات تلگرام از ANALYZER_API_BASE استفاده می‌کند (به تحلیلگر)
+     - n8n workflow از دو endpoint متفاوت استفاده می‌کند
+
+  ✅ راه‌حل: نام prompt-generator را به "prompt-generator-cf" تغییر دهید
+     (در prompt-generator/wrangler.jsonc: "name": "prompt-generator-cf")
+
+✓ text-to-image-template (تصویر)
+  [?] API آدرس معلوم: https://text-to-image-template.YOUR_DOMAIN.workers.dev
+  [?] TELEGRAM_BOT_TOKEN تنظیم شده؟
+  [?] TELEGRAM_DEFAULT_CHAT_ID در wrangler.json موجود؟
+
+✓ telegram-news-bot (بات)
+  [?] API آدرس معلوم: https://telegram-news-bot.YOUR_DOMAIN.workers.dev
+  [?] TELEGRAM_BOT_TOKEN تنظیم شده؟
+  [?] ANALYZER_API_BASE = https://llm-chat-app-template-v2.YOUR_DOMAIN.workers.dev
+  [?] BOT_NOTIFY_TOKEN تنظیم شده (برای امن‌سازی POST /notify)?
+  [?] ALLOWED_TELEGRAM_USER_ID تنظیم شده؟
+  [?] PUBLIC_WEBHOOK_URL = https://telegram-news-bot.YOUR_DOMAIN.workers.dev
+  [?] webhook تلگرام تنظیم شده (GET /set-webhook)?
+
+✓ render-bridge (Render جایگزین n8n)
+  [?] متغیرهای محیطی تنظیم شده:
+      - ANALYZER_API_BASE = https://llm-chat-app-template-v2.YOUR_DOMAIN.workers.dev
+      - PROMPT_API_BASE = https://llm-chat-app-template.YOUR_DOMAIN.workers.dev (یا prompt-generator-cf)
+      - IMAGE_API_BASE = https://text-to-image-template.YOUR_DOMAIN.workers.dev
+      - TELEGRAM_NOTIFY_URL = https://telegram-news-bot.YOUR_DOMAIN.workers.dev/notify
+      - TELEGRAM_NOTIFY_TOKEN = همان BOT_NOTIFY_TOKEN
+      - TELEGRAM_DEFAULT_CHAT_ID = آی‌دی چت
+  [?] Render cron برای اجرای هر ۱۵ دقیقه تنظیم شده؟
+
+
+جریان اتصالات
+--------------
+
+RSS Feeds
+    ↓
+render-bridge (/run-rss/)
+    ├─ POST → llm-chat-app-template-v2/api/chat
+    │         (تحلیل خبر + ذخیره job)
+    │
+    ├─ POST → llm-chat-app-template/api/prompts
+    │         (تولید پرامپت انگلیسی)
+    │
+    ├─ POST → text-to-image-template/api/generate-to-telegram
+    │         (تولید تصویر + ارسال تلگرام)
+    │
+    └─ POST → telegram-news-bot/notify
+              (اطلاع دادن به کاربر)
+
+تلگرام مستقیم (webhook)
+    ↓
+text-to-image-template/telegram/webhook
+    └─ /imagine <prompt> → تولید تصویر
+
+
+بررسی اتصالات شبکه
+-------------------
+
+Test 1: تحلیلگر قابل دسترسی؟
+  curl https://llm-chat-app-template-v2.YOUR_DOMAIN.workers.dev/
+
+Test 2: پرامپت جنریتور قابل دسترسی؟
+  curl https://llm-chat-app-template.YOUR_DOMAIN.workers.dev/
+
+Test 3: سرویس تصویر قابل دسترسی؟
+  curl https://text-to-image-template.YOUR_DOMAIN.workers.dev/
+
+Test 4: بات تلگرام قابل دسترسی؟
+  curl https://telegram-news-bot.YOUR_DOMAIN.workers.dev/health
+
+Test 5: render-bridge قابل دسترسی؟
+  curl https://render-bridge.onrender.com/health/
+
+Test 6: render-bridge می‌تواند به تحلیلگر متصل شود؟
+  curl -X POST https://render-bridge.onrender.com/run-rss/ \
+    -H "X-RUN-TOKEN: <RUN_SECRET>"
+  (لاگ‌ها را بررسی کن برای خطاهای اتصال)
+
+
+خطاهای احتمالی
+---------------
+
+❌ "ANALYZER_API_BASE is not configured"
+   ✓ حل: بات تلگرام ANALYZER_API_BASE را درست تنظیم کن
+
+❌ "Prompt generation returned no prompt"
+   ✓ حل: مطمئن شو که https://llm-chat-app-template/api/prompts کار می‌کند
+
+❌ "Database not found"
+   ✓ حل: D1 ID را در wrangler.jsonc بررسی کن
+
+❌ "Unauthorized notify call"
+   ✓ حل: TELEGRAM_NOTIFY_TOKEN و BOT_NOTIFY_TOKEN مطابقت ندارند
+
+❌ render-bridge HTTP 404 به worker
+   ✓ حل: URL worker در متغیرهای محیطی غلط است (بعد از .workers.dev فاصله یا کاراکتر اضافی؟)
+
+
+پیشنهاد فوری
+-----------
+
+1️⃣ نام prompt-generator را به "prompt-generator-cf" تغییر دهید (اختیاری اما توصیه شده)
+   - اگر تغییر دهید، render-bridge PROMPT_API_BASE را به‌روز کن
+
+2️⃣ همه متغیرهای محیطی را دو بار بررسی کن (نام و مقدار دقیق)
+
+3️⃣ بعد از هر deploy، ۳-۵ دقیقه صبر کن تا worker فعال شود
+
+4️⃣ log‌ها را در Cloudflare Workers Log Stream و Render بررسی کن

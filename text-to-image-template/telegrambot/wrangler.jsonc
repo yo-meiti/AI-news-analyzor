@@ -1,0 +1,10 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "telegram-news-bot",
+	"main": "index.js",
+	"compatibility_date": "2025-10-08",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"observability": {
+		"enabled": true
+	}
+}

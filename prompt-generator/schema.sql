@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS prompts (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_input TEXT NOT NULL,
+	prompt_text TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_prompts_created_at
+ON prompts (created_at DESC);
