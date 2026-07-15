@@ -1,0 +1,12 @@
+{
+  "name": "telegram-news-bot",
+  "main": "index.js",
+  "compatibility_date": "2025-10-08",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "vars": {
+    "ANALYZER_API_BASE": "<ANALYZER_WORKER_URL>",
+    "NOTIFY_SHARED_TOKEN": "<SHARED_NOTIFY_TOKEN>",
+    "ALLOWED_TELEGRAM_USER_ID": "<TELEGRAM_USER_ID>"
+  },
+  "observability": { "enabled": true }
+}

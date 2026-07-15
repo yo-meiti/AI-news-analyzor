@@ -1,0 +1,36 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "worker-bridge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-17",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BRIDGE_DO",
+        "class_name": "BridgeDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BridgeDO"]
+    }
+  ],
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  },
+  "vars": {
+    "RSS_FEEDS": "https://www.technologyreview.com/topic/artificial-intelligence/feed/,https://techcrunch.com/tag/ai/feed/",
+    "TELEGRAM_DEFAULT_CHAT_ID": "6512947443",
+    "ANALYZER_API_BASE": "https://llm-chat-app-template-meiti-v1.prompt-generator.workers.dev",
+    "PROMPT_API_BASE": "https://prompt-generator-cf.prompt-generator.workers.dev",
+    "IMAGE_API_BASE": "https://text-to-image-template.prompt-generator.workers.dev",
+    "TELEGRAM_NOTIFY_URL": "https://telegram-news-bot.prompt-generator.workers.dev/notify",
+    "NOTIFY_SHARED_TOKEN": "REDACTED_NOTIFY_VAR"
+  }
+}

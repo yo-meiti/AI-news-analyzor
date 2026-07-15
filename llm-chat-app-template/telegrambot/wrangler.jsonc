@@ -4,6 +4,10 @@
 	"main": "index.js",
 	"compatibility_date": "2025-10-08",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"vars": {
+		"ANALYZER_API_BASE": "https://llm-chat-app-template-meiti-v1.prompt-generator.workers.dev",
+		"NOTIFY_SHARED_TOKEN": "REDACTED_NOTIFY_VAR"
+	},
 	"observability": {
 		"enabled": true
 	}

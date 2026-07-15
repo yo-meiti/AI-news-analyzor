@@ -1,0 +1,177 @@
+DEPLOYMENT STEPS
+================
+
+This guide shows how to use this repository as a template and deploy your own RSS -> analysis -> prompt -> image -> Telegram pipeline.
+
+Important safety rule:
+- Do not commit real tokens, chat IDs, webhook secrets, or private worker URLs.
+- Use the placeholder values in public-code and set real values only in your own environment.
+
+1) Clone the repository
+------------------------
+
+Clone the public repository and enter the project folder.
+
+2) Review the public-safe code bundle
+-------------------------------------
+
+Use the code inside:
+- github-shareable/public-code/worker-bridge
+- github-shareable/public-code/llm-chat-app-template
+- github-shareable/public-code/prompt-generator
+- github-shareable/public-code/text-to-image-template
+- github-shareable/public-code/telegrambot
+
+3) Install prerequisites
+------------------------
+
+You need:
+- Node.js
+- npm
+- Wrangler CLI for Cloudflare Workers
+- A Cloudflare account
+- A Telegram bot token if you want Telegram delivery
+- Optional: a Render account if you want a separate bridge service
+
+4) Create the D1 databases
+--------------------------
+
+Create these databases in your own Cloudflare account:
+- one database for the analyzer worker
+- one database for the prompt generator worker
+
+Then apply the schema files from the worker folders.
+
+5) Install dependencies
+-----------------------
+
+From each worker folder, install packages with npm.
+
+6) Configure environment values
+-------------------------------
+
+Replace placeholders with your own values:
+- analyzer worker URL
+- prompt worker URL
+- image worker URL
+- Telegram notify endpoint
+- Telegram bot token
+- shared notify token
+- allowed Telegram user ID
+- RSS feed list
+- default chat ID
+
+Never keep these values in a public commit.
+
+7) Deploy the analyzer worker
+-----------------------------
+
+Deploy the analyzer worker first.
+
+Then verify:
+- /api/chat exists
+- /api/jobs/latest works
+- /api/persona works
+
+8) Deploy the prompt generator
+-------------------------------
+
+Deploy the prompt worker next.
+
+Then verify:
+- /api/prompts returns a prompt
+- the D1 table for prompts is reachable
+
+9) Deploy the image worker
+--------------------------
+
+Deploy the image worker after prompt generation is working.
+
+Then verify:
+- /api/generate-to-telegram returns success
+- Telegram receives a message or image
+
+10) Deploy the Telegram bot worker
+----------------------------------
+
+The public-safe bot code is in github-shareable/public-code/telegrambot.
+
+Configure these values in your own environment:
+- TELEGRAM_BOT_TOKEN
+- ANALYZER_API_BASE
+- ALLOWED_TELEGRAM_USER_ID
+- NOTIFY_SHARED_TOKEN
+
+Then deploy the bot worker and verify /health.
+
+11) Deploy the bridge worker
+----------------------------
+
+The bridge worker reads RSS, chooses a candidate, and calls the other workers in order.
+
+Configure:
+- RSS_FEEDS
+- ANALYZER_API_BASE
+- PROMPT_API_BASE
+- IMAGE_API_BASE
+- TELEGRAM_NOTIFY_URL
+- NOTIFY_SHARED_TOKEN
+- RUN_SECRET
+
+Then deploy the bridge worker and verify /health and /status.
+
+12) Connect Telegram webhook if needed
+-------------------------------------
+
+If you want Telegram webhook support, set the webhook URL in your own deployment and confirm the bot can receive POST requests.
+
+13) Run a manual test
+---------------------
+
+Trigger one RSS run manually.
+
+Expected flow:
+- bridge selects an RSS item
+- analyzer stores and returns analysis
+- prompt worker builds an image prompt
+- image worker generates the image
+- Telegram worker sends the final result
+
+14) Watch the logs
+------------------
+
+If something fails, check the worker logs in this order:
+- bridge
+- analyzer
+- prompt generator
+- image worker
+- Telegram bot
+
+15) Production checklist
+------------------------
+
+Before publishing the repo or using it for your own deployment:
+- remove all real tokens
+- remove all private URLs
+- keep only placeholders in public-code
+- confirm the Telegram bot folder includes code, not only wrangler config
+- confirm the README points to the public-safe bundle
+
+16) Recommended deployment order
+-------------------------------
+
+1. D1 databases
+2. analyzer worker
+3. prompt generator
+4. image worker
+5. Telegram bot worker
+6. bridge worker
+7. webhook and cron setup
+8. manual test run
+
+End result:
+- RSS is processed
+- analysis is generated
+- prompt is created
+- image is produced
+- Telegram receives the final output

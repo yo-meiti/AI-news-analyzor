@@ -1,0 +1,12 @@
+{
+  "name": "<IMAGE_WORKER_NAME>",
+  "main": "src/index.ts",
+  "compatibility_date": "<COMPATIBILITY_DATE>",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "upload_source_maps": true,
+  "ai": { "binding": "AI" },
+  "vars": {
+    "TELEGRAM_DEFAULT_CHAT_ID": "<TELEGRAM_CHAT_ID>"
+  },
+  "observability": { "enabled": true }
+}

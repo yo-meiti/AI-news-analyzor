@@ -1,18 +1,15 @@
 /**
- * Minimal Telegram bot worker.
+ * Public-safe Telegram bot worker.
  *
  * Responsibilities:
- * - Accept bridge notifications at POST /notify.
- * - Fetch the analysis text from the analyzer worker DB by external_id.
- * - Send the full analysis text directly to Telegram.
+ * - accept bridge notifications at POST /notify
+ * - fetch analysis text from the analyzer worker by external_id
+ * - send analysis text to Telegram
  *
- * Non-goals:
- * - No buttons.
- * - No channel publishing.
- * - No user command routing.
+ * Sensitive values are expected from environment variables.
  */
 
-const DEFAULT_CHAT_ID = "6512947443";
+const DEFAULT_CHAT_ID = "<TELEGRAM_USER_ID>";
 const ANALYSIS_POLL_TIMEOUT_MS = 30000;
 const ANALYSIS_POLL_INTERVAL_MS = 2500;
 const TELEGRAM_MESSAGE_LIMIT = 3500;
@@ -63,7 +60,7 @@ async function handleNotify(request, env) {
 				: typeof body?.id === "string"
 					? body.id
 					: "",
-		);
+	);
 	if (!externalId) {
 		return json({ ok: false, error: "external_id is required and must be valid" }, 400);
 	}
@@ -264,6 +261,6 @@ function delay(ms) {
 function json(data, status = 200) {
 	return new Response(JSON.stringify(data), {
 		status,
-		headers: { "content-type": "application/json; charset=utf-8" },
+		headers: { "content-type": "application/json" },
 	});
 }

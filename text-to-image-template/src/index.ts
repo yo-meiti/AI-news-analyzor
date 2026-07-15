@@ -2,6 +2,21 @@ const MODEL = "@cf/black-forest-labs/flux-2-dev";
 const DEFAULT_PROMPT = "cyberpunk alley in heavy rain, cinematic lighting";
 const MAX_PROMPT_LENGTH = 500;
 
+type ImageWorkerErrorCode = "IMG_GEN_001" | "IMG_TG_001" | "IMG_TG_002" | "IMG_REQ_001";
+
+class ImageWorkerError extends Error {
+	code: ImageWorkerErrorCode;
+
+	constructor(code: ImageWorkerErrorCode, message: string) {
+		super(message);
+		this.code = code;
+	}
+}
+
+function imageWorkerError(code: ImageWorkerErrorCode, message: string): ImageWorkerError {
+	return new ImageWorkerError(code, message);
+}
+
 interface AppEnv extends Env {
 	TELEGRAM_BOT_TOKEN?: string;
 	TELEGRAM_WEBHOOK_SECRET?: string;
@@ -66,7 +81,14 @@ export default {
 				});
 			} catch (error) {
 				console.error("Generate/send failed:", error);
-				return textResponse(errorMessage(error, "Generate/send failed. Try again."), 500);
+				return jsonResponse(
+					{
+						ok: false,
+						code: error instanceof ImageWorkerError ? error.code : "IMG_REQ_001",
+						error: errorMessage(error, "Generate/send failed. Try again."),
+					},
+					500,
+				);
 			}
 		}
 
@@ -94,7 +116,14 @@ export default {
 				);
 			} catch (error) {
 				console.error("Send to Telegram failed:", error);
-				return textResponse(errorMessage(error, "Failed to send image to Telegram."), 500);
+				return jsonResponse(
+					{
+						ok: false,
+						code: error instanceof ImageWorkerError ? error.code : "IMG_REQ_001",
+						error: errorMessage(error, "Failed to send image to Telegram."),
+					},
+					500,
+				);
 			}
 		}
 
@@ -160,7 +189,11 @@ async function generateImage(env: AppEnv, prompt: string): Promise<Uint8Array> {
 		MODEL === "@cf/black-forest-labs/flux-2-dev"
 			? await ai.run(MODEL, buildFlux2Input(prompt))
 			: await ai.run(MODEL, { prompt });
-	return toBytes(raw);
+	try {
+		return await toBytes(raw);
+	} catch (error) {
+		throw imageWorkerError("IMG_GEN_001", errorMessage(error, "Unsupported image output from model."));
+	}
 }
 
 function buildFlux2Input(prompt: string): Record<string, unknown> {
@@ -209,7 +242,7 @@ async function sendImageToTelegram(
 ): Promise<TelegramSendResult> {
 	const token = normalizeString(env.TELEGRAM_BOT_TOKEN);
 	if (!token) {
-		throw new Error("TELEGRAM_BOT_TOKEN is not configured.");
+		throw imageWorkerError("IMG_TG_001", "TELEGRAM_BOT_TOKEN is not configured.");
 	}
 
 	const form = new FormData();
@@ -225,10 +258,10 @@ async function sendImageToTelegram(
 	const parsed = parseJson(text);
 
 	if (!response.ok) {
-		throw new Error(`Telegram API error (${response.status}): ${truncate(text, 300)}`);
+		throw imageWorkerError("IMG_TG_002", `Telegram API error (${response.status}): ${truncate(text, 300)}`);
 	}
 	if (!parsed || parsed.ok !== true) {
-		throw new Error(`Telegram rejected request: ${truncate(text, 300)}`);
+		throw imageWorkerError("IMG_TG_002", `Telegram rejected request: ${truncate(text, 300)}`);
 	}
 
 	const result = parsed.result as Record<string, unknown> | undefined;

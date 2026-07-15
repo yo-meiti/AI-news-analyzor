@@ -1,0 +1,23 @@
+{
+  "name": "worker-bridge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-17",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "BRIDGE_DO", "class_name": "BridgeDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BridgeDO"] }],
+  "triggers": { "crons": ["0 0 * * *"] },
+  "vars": {
+    "RSS_FEEDS": "<RSS_FEED_URLS>",
+    "TELEGRAM_DEFAULT_CHAT_ID": "<TELEGRAM_CHAT_ID>",
+    "ANALYZER_API_BASE": "<ANALYZER_WORKER_URL>",
+    "PROMPT_API_BASE": "<PROMPT_WORKER_URL>",
+    "IMAGE_API_BASE": "<IMAGE_WORKER_URL>",
+    "TELEGRAM_NOTIFY_URL": "<TELEGRAM_NOTIFY_URL>",
+    "NOTIFY_SHARED_TOKEN": "<SHARED_NOTIFY_TOKEN>"
+  }
+}
