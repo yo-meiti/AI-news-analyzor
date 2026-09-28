@@ -31,6 +31,7 @@
     "PROMPT_API_BASE": "https://prompt-generator-cf.prompt-generator.workers.dev",
     "IMAGE_API_BASE": "https://text-to-image-template.prompt-generator.workers.dev",
     "TELEGRAM_NOTIFY_URL": "https://telegram-news-bot.prompt-generator.workers.dev/notify",
-    "NOTIFY_SHARED_TOKEN": "REDACTED_NOTIFY_VAR"
+    // NOTE: Do NOT commit real secret values here. Set the real token with `wrangler secret put`.
+    "NOTIFY_SHARED_TOKEN": "<SET_VIA_SECRET>"
   }
 }

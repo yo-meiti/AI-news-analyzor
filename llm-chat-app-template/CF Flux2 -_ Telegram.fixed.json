@@ -1,0 +1,513 @@
+{
+  "name": "CF Flux2 -> Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst now = Date.now();\nconst WINDOW_MS = 72 * 60 * 60 * 1000; // 72h\n\nconst out = [];\nconst dated = [];\n\nfor (const r of rows) {\n  const publishedRaw = (r.isoDate || r.pubDate || '').toString().trim();\n  const ts = Date.parse(publishedRaw);\n\n  if (!Number.isFinite(ts)) {\n    out.push({ json: r });\n    continue;\n  }\n\n  dated.push({ r, ts });\n\n  const age = now - ts;\n  if (age >= 0 && age <= WINDOW_MS) {\n    out.push({ json: r });\n  }\n}\n\nif (out.length === 0 && dated.length > 0) {\n  dated.sort((a, b) => b.ts - a.ts);\n  return dated.slice(0, 3).map(x => ({ json: x.r }));\n}\n\nreturn out;\n"
+      },
+      "id": "6388d5c8-6275-4583-a62c-bd2a9cad6aea",
+      "name": "Fresh Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3536,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\n\nfunction hash(str) {\n  let h = 0;\n  for (let i = 0; i < str.length; i++) {\n    h = ((h << 5) - h) + str.charCodeAt(i);\n    h |= 0;\n  }\n  return Math.abs(h).toString(36);\n}\n\nconst out = [];\nfor (const r of items) {\n  const title = (r.title || '').toString().trim();\n  const sourceUrl = (r.link || '').toString().trim();\n  const snippet = (r.contentSnippet || r.content || '').toString().replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n  const publishedAt = (r.isoDate || r.pubDate || '').toString().trim();\n  if (!title || !sourceUrl) continue;\n\n  const base = `${sourceUrl}|${publishedAt}|${title}`;\n  let externalId = `auto-${hash(base)}-${Date.now()}`;\n  externalId = externalId.replace(/[^a-zA-Z0-9._:-]/g, '-').slice(0, 80);\n  if (externalId.length < 3) externalId = `auto-${Date.now()}`;\n\n  const newsText = [\n    `Title: ${title}`,\n    snippet ? `Summary: ${snippet}` : '',\n    `Source URL: ${sourceUrl}`,\n    publishedAt ? `Published: ${publishedAt}` : ''\n  ].filter(Boolean).join('\\n');\n\n  out.push({\n    json: {\n      external_id: externalId,\n      title,\n      source_url: sourceUrl,\n      published_at: publishedAt,\n      news_text: newsText\n    }\n  });\n}\n\nreturn out;"
+      },
+      "id": "f36f0611-ac64-44a7-8d93-e31cfabdc928",
+      "name": "Prepare Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nif (!rows.length) return [];\n\n// کلید Tavily\nconst TAVILY_API_KEY = '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';\n\nconst MAX_CANDIDATES = 6;\nconst MAX_RESULTS = 12;\nconst now = Date.now();\n\nconst trustedNews = new Set([\n  'reuters.com','bloomberg.com','ft.com','wsj.com','theinformation.com',\n  'techcrunch.com','theverge.com','openai.com','anthropic.com','nvidia.com',\n  'microsoft.com','google.com'\n]);\n\nfunction parseTs(v = '') {\n  const t = Date.parse(String(v || '').trim());\n  return Number.isFinite(t) ? t : 0;\n}\n\nfunction domainOf(url = '') {\n  try { return new URL(url).hostname.replace(/^www\\./, '').toLowerCase(); }\n  catch { return ''; }\n}\n\nfunction platformOf(domain = '') {\n  if (!domain) return 'web';\n  if (domain === 'x.com' || domain.endsWith('.x.com') || domain === 'twitter.com' || domain.endsWith('.twitter.com')) return 'x';\n  if (domain === 'instagram.com' || domain.endsWith('.instagram.com')) return 'instagram';\n  if (domain === 'reddit.com' || domain.endsWith('.reddit.com')) return 'reddit';\n  if (domain === 'youtube.com' || domain.endsWith('.youtube.com') || domain === 'youtu.be') return 'youtube';\n  if (domain === 'linkedin.com' || domain.endsWith('.linkedin.com')) return 'linkedin';\n  if (domain === 'facebook.com' || domain.endsWith('.facebook.com')) return 'facebook';\n  if (domain === 't.me' || domain.endsWith('.t.me') || domain === 'telegram.me') return 'telegram';\n  return 'web';\n}\n\nfunction recencyBonus(publishedAt = '') {\n  const t = parseTs(publishedAt);\n  if (!t) return 0;\n  const hours = (now - t) / 36e5;\n  if (hours <= 6) return 8;\n  if (hours <= 24) return 5;\n  if (hours <= 48) return 3;\n  if (hours <= 72) return 1;\n  return 0;\n}\n\nasync function searchPresenceByTitle(title) {\n  const controller = new AbortController();\n  const timer = setTimeout(() => controller.abort(), 12000);\n\n  try {\n    const res = await fetch('https://api.tavily.com/search', {\n      method: 'POST',\n      headers: {\n        'content-type': 'application/json',\n        'authorization': `Bearer ${TAVILY_API_KEY}`\n      },\n      body: JSON.stringify({\n        query: `\"${title}\"`,\n        topic: 'news',\n        search_depth: 'basic',\n        max_results: MAX_RESULTS,\n        include_answer: false,\n        include_raw_content: false\n      }),\n      signal: controller.signal\n    });\n\n    if (!res.ok) {\n      return { score: 0, domains: [], platforms: [], trusted_hits: 0, results_count: 0 };\n    }\n\n    const data = await res.json();\n    const results = Array.isArray(data.results) ? data.results : [];\n\n    const domains = new Set();\n    const platforms = new Set();\n    let trustedHits = 0;\n\n    for (const r of results) {\n      const d = domainOf(r.url || '');\n      if (!d) continue;\n      domains.add(d);\n      platforms.add(platformOf(d));\n      if (trustedNews.has(d)) trustedHits += 1;\n    }\n\n    const socialPlatforms = [...platforms].filter(p => p !== 'web');\n\n    // امتیاز نهایی بر اساس میزان پوشش\n    const score =\n      (domains.size * 2) +           // سایت‌های یکتا\n      (socialPlatforms.length * 5) + // پلتفرم‌های اجتماعی یکتا\n      (trustedHits * 2) +            // منابع معتبر\n      Math.min(results.length, 12);  // حجم نتایج\n\n    return {\n      score,\n      domains: [...domains],\n      platforms: [...platforms],\n      trusted_hits: trustedHits,\n      results_count: results.length\n    };\n  } finally {\n    clearTimeout(timer);\n  }\n}\n\nconst candidates = [...rows]\n  .sort((a, b) => parseTs(b.published_at || b.isoDate || b.pubDate) - parseTs(a.published_at || a.isoDate || a.pubDate))\n  .slice(0, MAX_CANDIDATES);\n\nfor (const it of candidates) {\n  const title = (it.title || '').toString().trim();\n  if (!title) {\n    it.rank_score = -999;\n    continue;\n  }\n\n  let score = recencyBonus(it.published_at || it.isoDate || it.pubDate || '');\n\n  try {\n    // اگر key ست نشده بود، fallback ساده\n    if (!TAVILY_API_KEY || TAVILY_API_KEY.includes('REPLACE_WITH_')) {\n      const d = domainOf(it.source_url || '');\n      score += trustedNews.has(d) ? 5 : 0;\n      it.presence = { note: 'no tavily key' };\n    } else {\n      const presence = await searchPresenceByTitle(title);\n      const socialCount = presence.platforms.filter(p => p !== 'web').length;\n      const crossPlatformBonus = socialCount >= 2 ? 6 : 0;\n      const rumorPenalty = title.toLowerCase().includes('rumor') || title.includes('شایعه') ? -8 : 0;\n\n      score += presence.score + crossPlatformBonus + rumorPenalty;\n      it.presence = presence;\n    }\n  } catch (e) {\n    it.presence = { error: String(e) };\n  }\n\n  it.rank_score = Math.round(score * 10) / 10;\n}\n\ncandidates.sort((a, b) => (b.rank_score || 0) - (a.rank_score || 0));\nreturn [{ json: candidates[0] }];\n"
+      },
+      "id": "3a6dc9f1-01b9-42d8-bfa3-bfbc91e23a0c",
+      "name": "Rank Best News",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4112,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\nif (!store.sentKeys || typeof store.sentKeys !== 'object') {\n  store.sentKeys = {};\n}\n\nconst TTL_MS = 30 * 24 * 60 * 60 * 1000;\nconst now = Date.now();\n\nfor (const [k, ts] of Object.entries(store.sentKeys)) {\n  if (typeof ts === 'number' && (now - ts) > TTL_MS) {\n    delete store.sentKeys[k];\n  }\n}\n\nfunction normalizeTitle(raw = '') {\n  return String(raw)\n    .normalize('NFKC')\n    .replace(/[\\u200B-\\u200D\\uFEFF\\u2060]/g, '')\n    .replace(/ـ/g, '')\n    .replace(/ك/g, 'ک')\n    .replace(/ي/g, 'ی')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction canonicalTitle(raw = '') {\n  return normalizeTitle(raw)\n    .replace(/\\s*[-|–—•]+\\s*[^-|–—•]{1,80}$/g, '')\n    .replace(/[^\\p{L}\\p{N}\\s]/gu, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction canonicalUrl(raw = '') {\n  try {\n    const u = new URL(String(raw).trim());\n    u.hash = '';\n    const drop = [\n      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',\n      'gclid', 'fbclid', 'oc', 'ved'\n    ];\n    for (const p of drop) u.searchParams.delete(p);\n    return `${u.origin}${u.pathname}${u.search ? `?${u.searchParams.toString()}` : ''}`\n      .replace(/\\/$/, '')\n      .toLowerCase();\n  } catch {\n    return '';\n  }\n}\n\nconst rawTitle = ($json.title ?? '').toString();\nconst strict = normalizeTitle(rawTitle);\nconst loose = canonicalTitle(rawTitle);\nconst source = canonicalUrl($json.source_url ?? $json.link ?? '');\n\nif (!strict) return [{ json: $json }];\n\nconst keys = [`title:${strict}`];\nif (loose && loose !== strict) keys.push(`title_loose:${loose}`);\nif (source) keys.push(`url:${source}`);\n\nfor (const k of keys) {\n  if (store.sentKeys[k]) return [];\n}\n\nfor (const k of keys) {\n  store.sentKeys[k] = now;\n}\n\nreturn [{ json: $json }];\n"
+      },
+      "id": "3b25ed43-0fc0-49ec-9d39-df468c9315b7",
+      "name": "Deduplicate Title",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4368,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 15,
+              "unit": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "dd43420b-66f4-4ab0-a55a-06e49d382b8a",
+      "name": "Cron (Every 15m)1",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        3024,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=(OpenAI%20OR%20Anthropic%20OR%20Google%20DeepMind%20OR%20Meta%20AI%20OR%20NVIDIA%20OR%20Microsoft%20Copilot%20OR%20Claude%20OR%20GPT-5%20OR%20Llama%203%20OR%20Mistral)%20(enterprise%20OR%20infrastructure%20OR%20datacenter%20OR%20chip%20OR%20agentic%20OR%20API%20OR%20pricing%20OR%20funding%20OR%20regulation)%20when:3d&hl=en-US&gl=US&ceid=US:en",
+        "options": {}
+      },
+      "id": "3fc2829f-46c9-4985-b397-92b77d332a61",
+      "name": "Read RSS1",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        880
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.status === 'done' && !!$json.external_id}}",
+              "operation": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "76f36163-f1d8-4c3e-be40-204680ae27bf",
+      "name": "IF Ready To Notify",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-chat-app-template-v2.ysblasqsla.workers.dev/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { external_id: $json.external_id, news_title: $json.title, messages: [ { role: 'user', content: $json.news_text } ] } }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "id": "635b6c85-e28f-44d5-b0c1-0e875843d205",
+      "name": "Start Chat (stream)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4768,
+        1008
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": false,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $node[\"Deduplicate Title\"].json;\nreturn [{\n  json: {\n    external_id: src.external_id ?? null,\n    title: src.title ?? null,\n    source_url: src.source_url ?? null,\n    published_at: src.published_at ?? null\n  }\n}];\n\n"
+      },
+      "id": "6450a1b2-640b-4b8b-aee8-c7778c2268c7",
+      "name": "Carry Context2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4112,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://llm-chat-app-template-v2.ysblasqsla.workers.dev/api/jobs/{{encodeURIComponent($json.external_id)}}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "55c7b5f4-324c-483c-a104-a135a93e2249",
+      "name": "Get Job From DB2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3808,
+        1120
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $json.job ?? null;\n\nif (!job) {\n  return [{\n    json: {\n      external_id: $json.external_id ?? $node['Carry Context2'].json.external_id ?? null,\n      title: $node['Carry Context2'].json.title ?? null,\n      status: 'missing',\n      analysis: '',\n      error: ($json.error?.message || $json.error || 'Job not ready/not found').toString(),\n      created_at: null,\n      updated_at: null\n    }\n  }];\n}\n\nlet analysis = (job.analysisText ?? '').toString();\nanalysis = analysis.replace(/\\\\\\\\n/g, '\\n').replace(/\\\\n/g, '\\n');\n\nreturn [{\n  json: {\n    external_id: job.externalId ?? $node['Carry Context2'].json.external_id ?? null,\n    title: (job.newsTitle ?? $node['Carry Context2'].json.title ?? '').toString(),\n    status: job.status ?? null,\n    analysis,\n    error: job.errorText ?? null,\n    created_at: job.createdAt ?? null,\n    updated_at: job.updatedAt ?? null\n  }\n}];"
+      },
+      "id": "de9a6287-9412-4dd8-8422-ac7a7e57c514",
+      "name": "Final Output2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3536,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://telegram-news-bot.ysblasqsla.workers.dev/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": {
+            "jsCode": "const rows = $input.all().map(i => i.json);\n+if (!rows.length) return [];\n+\n+// Tavily API key must NOT be committed. Configure it in n8n credentials or environment.\n+const TAVILY_API_KEY = \"<SET_VIA_SECRET>\";\n+\n+const MAX_CANDIDATES = 6;\n+const MAX_RESULTS = 12;\n+const now = Date.now();\n+\n+const trustedNews = new Set([\n+  'reuters.com','bloomberg.com','ft.com','wsj.com','theinformation.com',\n+  'techcrunch.com','theverge.com','openai.com','anthropic.com','nvidia.com',\n+  'microsoft.com','google.com'\n+]);\n+\n+function parseTs(v = '') {\n+  const t = Date.parse(String(v || '').trim());\n+  return Number.isFinite(t) ? t : 0;\n+}\n+\n+function domainOf(url = '') {\n+  try { return new URL(url).hostname.replace(/^www\\./, '').toLowerCase(); }\n+  catch { return ''; }\n+}\n+\n+function platformOf(domain = '') {\n+  if (!domain) return 'web';\n+  if (domain === 'x.com' || domain.endsWith('.x.com') || domain === 'twitter.com' || domain.endsWith('.twitter.com')) return 'x';\n+  if (domain === 'instagram.com' || domain.endsWith('.instagram.com')) return 'instagram';\n+  if (domain === 'reddit.com' || domain.endsWith('.reddit.com')) return 'reddit';\n+  if (domain === 'youtube.com' || domain.endsWith('.youtube.com') || domain === 'youtu.be') return 'youtube';\n+  if (domain === 'linkedin.com' || domain.endsWith('.linkedin.com')) return 'linkedin';\n+  if (domain === 'facebook.com' || domain.endsWith('.facebook.com')) return 'facebook';\n+  if (domain === 't.me' || domain.endsWith('.t.me') || domain === 'telegram.me') return 'telegram';\n+  return 'web';\n+}\n+\n+function recencyBonus(publishedAt = '') {\n+  const t = parseTs(publishedAt);\n+  if (!t) return 0;\n+  const hours = (now - t) / 36e5;\n+  if (hours <= 6) return 8;\n+  if (hours <= 24) return 5;\n+  if (hours <= 48) return 3;\n+  if (hours <= 72) return 1;\n+  return 0;\n+}\n+\n+async function searchPresenceByTitle(title) {\n+  const controller = new AbortController();\n+  const timer = setTimeout(() => controller.abort(), 12000);\n+\n+  try {\n+    const res = await fetch('https://a [truncated]" 
+          },
+              "value": "application/json"
+            },
+            {
+              "name": "x-notify-token",
+              "value": "<SET_VIA_SECRET>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { external_id: $json.external_id, title: $json.title } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "40856222-f3c1-48ac-ab51-0e19b1364740",
+      "name": "Notify Telegram Bot2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4768,
+        1376
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 35
+      },
+      "id": "2cf8fd85-6f34-4910-af60-9cc14bd3739e",
+      "name": "Wait 35s1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4368,
+        1120
+      ],
+      "webhookId": "3f4e9676-0bc2-401e-b834-89edc1dd9727"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run once for each item)\nconst src = $json;\n\nconst pickFirstText = (...values) => {\n\tfor (const v of values) {\n\t\tif (typeof v === 'string' && v.trim()) return v.trim();\n\t}\n\treturn '';\n};\n\n// 1) تلاش برای گرفتن متن مستقیم\nlet input = pickFirstText(\n\tsrc.input,\n\tsrc.text,\n\tsrc.prompt_input,\n\tsrc.description,\n\tsrc.summary,\n\tsrc.content,\n\tsrc.body\n);\n\n// 2) اگر متن مستقیم نبود، از title + خلاصه بساز\nif (!input) {\n\tconst title = pickFirstText(src.title);\n\tconst details = pickFirstText(src.summary, src.description, src.content, src.body);\n\n\tinput = [title ? `Title: ${title}` : '', details ? `Details: ${details}` : '']\n\t\t.filter(Boolean)\n\t\t.join('\\n');\n}\n\n// 3) اگر هنوز خالیه، آیتم رد بشه\nif (!input) return [];\n\n// 4) پاکسازی متن\ninput = input\n\t.replace(/<[^>]*>/g, ' ')   // حذف HTML\n\t.replace(/\\s+/g, ' ')\n\t.trim();\n\n// محدودیت طول برای API\nif (input.length > 2000) input = input.slice(0, 2000);\n\n// خروجی استاندارد برای نود مدل/HTTP\nreturn [\n\t{\n\t\tjson: {\n\t\t\tinput,                 // همین فیلد رو به /api/prompts بفرست\n\t\t\ttitle: src.title || null,\n\t\t\tsource_url: src.source_url || null\n\t\t}\n\t}\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        704
+      ],
+      "id": "997b841c-2311-4611-b535-a449ff2ab4d3",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = ($json.input ?? '').toString().trim();\nif (!input) return [];\nreturn [{ json: { input } }];"
+      },
+      "id": "0498bb5f-e176-490a-8b57-bbf8d152f49e",
+      "name": "Ensure Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4624,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-chat-app-template.ysblasqsla.workers.dev/api/prompts",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input",
+              "value": "={{$json.input}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7f60ba80-6fd2-4261-9646-7c0b496ffa6a",
+      "name": "Generate Prompt (Worker)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4768,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_PROMPT_LENGTH = 500;\nconst MAX_CAPTION_LENGTH = 1024;\n\nreturn $input.all().map((item, index) => {\n  const src = item.json ?? {};\n\n  let prompt = String(src.prompt ?? \"\").trim();\n  if (!prompt) {\n    prompt = String(src.input ?? \"\").trim();\n  }\n\n  if (!prompt) {\n    throw new Error(`Item ${index + 1}: prompt خالی است`);\n  }\n\n  if (prompt.length > MAX_PROMPT_LENGTH) {\n    prompt = prompt.slice(0, MAX_PROMPT_LENGTH);\n  }\n\n  const payload = { prompt };\n\n  const chatId = String(src.chatId ?? src.chat_id ?? \"\").trim();\n  if (chatId) {\n    payload.chatId = chatId;\n  }\n\n  const title = String(src.input ?? \"\")\n    .replace(/^Title:\\s*/i, \"\")\n    .trim();\n\n  if (title) {\n    payload.caption = `📰 ${title}`.slice(0, MAX_CAPTION_LENGTH);\n  }\n\n  return { json: payload };\n});\n"
+      },
+      "id": "a8fc5819-a124-4ee6-b385-06c0891f7ad9",
+      "name": "Build Worker Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5008,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://text-to-image-template.ysblasqsla.workers.dev/api/generate-to-telegram",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "af55954c-2772-46a5-988f-91ea8be0aa13",
+      "name": "Send To CF Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        992
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fresh Filter": {
+      "main": [
+        [
+          {
+            "node": "Prepare Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Candidates": {
+      "main": [
+        [
+          {
+            "node": "Rank Best News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank Best News": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate Title",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate Title": {
+      "main": [
+        [
+          {
+            "node": "Start Chat (stream)2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait 35s1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron (Every 15m)1": {
+      "main": [
+        [
+          {
+            "node": "Read RSS1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read RSS1": {
+      "main": [
+        [
+          {
+            "node": "Fresh Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ready To Notify": {
+      "main": [
+        [
+          {
+            "node": "Notify Telegram Bot2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Start Chat (stream)2": {
+      "main": [
+        []
+      ]
+    },
+    "Carry Context2": {
+      "main": [
+        [
+          {
+            "node": "Get Job From DB2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job From DB2": {
+      "main": [
+        [
+          {
+            "node": "Final Output2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Output2": {
+      "main": [
+        [
+          {
+            "node": "IF Ready To Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 35s1": {
+      "main": [
+        [
+          {
+            "node": "Carry Context2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Telegram Bot2": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Ensure Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Input": {
+      "main": [
+        [
+          {
+            "node": "Generate Prompt (Worker)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Prompt (Worker)": {
+      "main": [
+        [
+          {
+            "node": "Build Worker Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Worker Payload": {
+      "main": [
+        [
+          {
+            "node": "Send To CF Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b2863440-3441-45de-ab92-4e4f6a34ce7a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "49e3015cbf504444b81e788b15c6cffec3960758eb4ebf0ddb8266962f66ea97"
+  },
+  "id": "EFzwicn3xKyCAtcu",
+  "tags": []
+}

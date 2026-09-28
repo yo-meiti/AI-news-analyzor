@@ -6,7 +6,8 @@
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"vars": {
 		"ANALYZER_API_BASE": "https://llm-chat-app-template-meiti-v1.prompt-generator.workers.dev",
-		"NOTIFY_SHARED_TOKEN": "REDACTED_NOTIFY_VAR"
+		// NOTE: Do NOT commit real secret values here. Set the real token with `wrangler secret put`.
+		"NOTIFY_SHARED_TOKEN": "<SET_VIA_SECRET>"
 	},
 	"observability": {
 		"enabled": true

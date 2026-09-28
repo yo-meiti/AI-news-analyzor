@@ -1,0 +1,9 @@
+# Replace exact literals with a safe placeholder. Lines starting with # are comments.
+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==>REDACTED_TAVILY_KEY
+0b040ef6f3ebaacebc19f587b29d002612aa6a59d0b578c2==>REDACTED_NOTIFY_TOKEN
+workerbridge-notify-v1==>REDACTED_NOTIFY_VAR
+1ea6afa7ec19bae978a5edcf917000928ccf21d099d424de7db109e488606726==>REDACTED_NOTIFY_TOKEN
+49e3015cbf504444b81e788b15c6cffec3960758eb4ebf0ddb8266962f66ea97==>REDACTED_INSTANCE_ID
+
+# Add any other literal tokens you want removed — one per line in the
+# format <literal>==>REPLACEMENT
